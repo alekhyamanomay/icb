@@ -1,36 +1,80 @@
-from flask import Blueprint, render_template, redirect, url_for, request,flash
+from flask import Blueprint, render_template, redirect, url_for, request,flash,make_response,jsonify
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import login_user, logout_user, login_required
+from flask import current_app as app
+from icb.models import User
+from functools import wraps
+from flask_jwt import jwt_required
+# from jwt import verify_token
 from .models import User
+import jwt
 from . import db
 
 auth = Blueprint('auth', __name__)
+
+
+def verify_token(func):
+    @wraps(func)
+    def wrapped(*args, **kwargs):
+        """
+        Decodes the auth token
+        :param auth_token:
+        :return: integer|string
+        """
+        print(request.args.get('token'))
+        token = request.args.get('token')
+        if not token:
+            return jsonify({'message':"Missing token"}), 403
+        try:
+            payload = jwt.decode(token, app.config.get('SECRET_KEY'))
+            return payload['sub']
+        except :
+            return jsonify({'message':"Invalid token"}), 403
+        return func(*args,**kwargs)
+    return wrapped
 
 @auth.route('/')
 def index():
     return render_template("index.html")
 
 @auth.route('/login', methods=['POST','GET','OPTIONS'])
+# @verify_token
 def login():
+    responseObject = {}
     # req = request.get_json()
     email = request.form['email']
     password =  request.form['password']
-    print(email, password,"**************************888")
-    user = User.query.filter_by(email=email).first()
-    
     # check if the user actually exists
-    # take the user-supplied password, hash it, and compare it to the hashed password in the database
-    if not user or not check_password_hash(user.password, password):
-        # flash('Please check your login details and try again.')
-        # return redirect(url_for('auth.login')) 
-        # if the user doesn't exist or password is wrong, reload the 
-        print("_____-______________________________-")
-        return redirect(url_for('auth.login'))
-    # if the above check passes, then we know the user has the right credentials
-    print(User,"+++++++++++++++++++++++++++++++")
-    return redirect(url_for('auth.dashboard'))
+    try:
+        user = User.query.filter_by(email=email).first()
+
+        # take the user-supplied password, hash it, and compare it to the hashed password in the database
+        if not user or not check_password_hash(user.password, password):
+            # flash('Please check your login details and try again.')
+            return redirect(url_for('auth.login'))
+
+        auth_token = user.encode_auth_token(user.id)
+        print(auth_token)
+        if auth_token:
+            responseObject = {
+                        'status': 'success',
+                        'message': 'Successfully logged in.',
+                        'auth_token': auth_token.decode('utf-8')
+                    }
+            return render_template('dashboard.html', result = responseObject['auth_token'])
+            # return make_response(jsonify(responseObject)), 200
+    except Exception as e:
+        print(e)
+        responseObject = {
+            'status': 'fail',
+            'message': 'Try again'
+            }
+        return make_response(jsonify(responseObject)), 500
+        # if the above check passes, then we know the user has the right credentials
+    
 
 @auth.route('/dashboard',methods=['POST','GET','OPTIONS'])
+@verify_token
 def dashboard():
     return render_template("dashboard.html")
 
